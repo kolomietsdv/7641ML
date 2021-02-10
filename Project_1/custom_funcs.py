@@ -10,6 +10,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.sparse as sps
+import itertools
 
 
 def time_it(f, *args, **kwargs):
@@ -52,10 +53,22 @@ def brute_force_parameters(par_name, par_values, estimator_kwargs, x_train, y_tr
     if not estimator:
         estimator = DecisionTreeClassifier
 
-    for par_value in par_values:
-        estimator_kwargs[par_name] = par_value
-        dt_clf = estimator(**estimator_kwargs)
-        metrics[par_value] = cross_validate(dt_clf, X=x_train, y=y_train, cv=3, n_jobs=1, scoring=scorers)
+    if type(par_name) == list:
+        total = len(list(itertools.product(*par_values)))
+        for i, par_set in enumerate(itertools.product(*par_values), start=1):
+            print(f'\r{i}/{total}', end='')
+            estimator_kwargs.update(dict(zip(par_name, par_set)))
+            clf = estimator(**estimator_kwargs)
+            metrics[par_set] = cross_validate(clf, X=x_train, y=y_train, cv=3, n_jobs=1, scoring=scorers,
+                                              return_train_score=True)
+    else:
+        total = len(par_values)
+        for i, par_value in enumerate(par_values, start=1):
+            print(f'\r{i}/{total}', end='')
+            estimator_kwargs[par_name] = par_value
+            clf = estimator(**estimator_kwargs)
+            metrics[par_value] = cross_validate(clf, X=x_train, y=y_train, cv=3, n_jobs=1, scoring=scorers,
+                                                return_train_score=True)
 
     metrics = dict(
         map(lambda x: (x[0],
@@ -86,6 +99,11 @@ def plot_metrics(metrics_dict, class_names, baselines=None):
                     [metrics_dict[x]['test_accuracy'] for x in x_values], color='red',
                     label='accuracy')
     axes[0][0].set_title('accuracy')
+
+    axes[0][0].plot(x_values,
+                    [metrics_dict[x]['train_accuracy'] for x in x_values], color='orange',
+                    label='train_accuracy')
+    # axes[0][0].set_title('accuracy')
 
     if baselines:
         if 'accuracy' in baselines:
@@ -157,20 +175,32 @@ def encode_input_data(df, trained_ohes=None):
     return X, y, trained_ohes
 
 
-def plot_heatmap(metric_dict):
+def plot_heatmap(metric_dict, inner_dicts=False, colnames=['depth', 'n_neurons', 'acc']):
     fig, ax = plt.subplots()
     fig.set_size_inches(12, 6)
 
-    results_df = pd.DataFrame(
-        list(
-            map(
-            lambda x: (x[0][0], x[0][1], x[1][-1][-1]),
-            metric_dict.items()
-            )
-        ), columns=['depth', 'n_neurons', 'acc']
-    )
+    if inner_dicts:
+        results_df = pd.DataFrame(
+            list(
+                map(
+                lambda x: (round(x[0][0], 5), x[0][1], x[1]['test_accuracy']),
+                metric_dict.items()
+                )
+            ), columns=colnames
+        )
+    else:
+        results_df = pd.DataFrame(
+            list(
+                map(
+                lambda x: (x[0][0], x[0][1], x[1][-1][-1]),
+                metric_dict.items()
+                )
+            ), columns=colnames
+        )
+
+
     sns.heatmap(
-        results_df.pivot(index='depth', columns='n_neurons', values='acc'),
+        results_df.pivot(index=colnames[0], columns=colnames[1], values=colnames[2]),
         annot=True, ax=ax
     )
     ax.set_title('Accuracy heatmap',)
