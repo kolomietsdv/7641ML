@@ -43,10 +43,14 @@ def build_scorers(class_labels):
     return scorer_dict
 
 
-def brute_force_parameters(par_name, par_values, estimator_kwargs, x_train, y_train, estimator=None):
+def brute_force_parameters(par_name, par_values, estimator_kwargs, x_train, y_train, estimator=None,
+                           regression=False):
     np.random.seed(13)
 
-    scorers = build_scorers(np.unique(y_train))
+    if regression:
+        scorers = {'MSE': lambda estmtr, x, y: sklearn.metrics.mean_squared_error(y, estmtr.predict(x))}
+    else:
+        scorers = build_scorers(np.unique(y_train))
     
     metrics = {}
 
@@ -78,13 +82,18 @@ def brute_force_parameters(par_name, par_values, estimator_kwargs, x_train, y_tr
     return metrics
 
 
-def extract_baselines(metric_object):
+def extract_baselines(metric_object, regression=False):
     baselines = {}
-    for x in [
-        'accuracy',
-        'precision_-1', 'precision_0', 'precision_1',
-        'recall_-1', 'recall_0', 'recall_1']:
-        baselines[x] = metric_object[f'test_{x}']
+
+    if regression:
+        baselines['MSE'] = metric_object[f'test_MSE']
+    else:
+        for x in [
+            'accuracy',
+            'precision_-1', 'precision_0', 'precision_1',
+            'recall_-1', 'recall_0', 'recall_1'
+        ]:
+            baselines[x] = metric_object[f'test_{x}']
     return baselines
 
 
@@ -149,6 +158,36 @@ def plot_metrics(metrics_dict, class_names, baselines=None):
     return fig, axes
 
 
+def plot_regression_metrics(metrics_dict, baselines=None):
+
+    fig, axes = plt.subplots(1, 2)
+    fig.set_size_inches(10, 5)
+
+    x_values = sorted(metrics_dict.keys())
+
+    axes[0].plot(x_values,
+                    [metrics_dict[x]['test_MSE'] for x in x_values], color='red',
+                    label='test_MSE')
+    axes[0].set_title('accuracy')
+
+    axes[0].plot(x_values,
+                    [metrics_dict[x]['train_MSE'] for x in x_values], color='orange',
+                    label='train_MSE')
+
+    if baselines:
+        if 'MSE' in baselines:
+            axes[0].axhline(baselines['MSE'], alpha=0.5, label='baseline_MSE',
+                               linestyle='--')
+    axes[0].legend()
+
+    axes[1].plot(x_values,
+                    [metrics_dict[x]['fit_time'] for x in x_values], color='blue')
+    axes[1].set_title('duration')
+
+    # fig.suptitle('Max depth effect', fontsize=15)
+    plt.tight_layout()
+    return fig, axes
+
 def encode_input_data(df, trained_ohes=None):
     df = df.copy()
     if not trained_ohes:
@@ -169,39 +208,103 @@ def encode_input_data(df, trained_ohes=None):
 
             ohe_encoded = trained_ohes[col].fit_transform(df[col].values.reshape(-1, 1))
             encoded.append(ohe_encoded)
-    #         print(encoded[-1].shape)
+#             print(encoded[-1].shape)
     #     X = np.hstack(encoded)
-    X = sps.hstack(encoded)
+#         print(encoded[-1].shape)
+    if is_col_object.sum() > 0:
+        X = sps.hstack(encoded)
+    else:
+        X = np.hstack(encoded)
     return X, y, trained_ohes
 
 
-def plot_heatmap(metric_dict, inner_dicts=False, colnames=['depth', 'n_neurons', 'acc']):
-    fig, ax = plt.subplots()
-    fig.set_size_inches(12, 6)
+def plot_heatmap(metric_dict, inner_dicts=False, metrics_to_plot=['test_accuracy'],
+                 colnames=['depth', 'n_neurons', 'acc'], sharex=False, cmap='Reds',
+                 **kwargs):
 
-    if inner_dicts:
-        results_df = pd.DataFrame(
-            list(
-                map(
-                lambda x: (round(x[0][0], 5), x[0][1], x[1]['test_accuracy']),
-                metric_dict.items()
-                )
-            ), columns=colnames
+    fig, ax = plt.subplots(len(metrics_to_plot), 1, sharex=sharex)
+    fig.set_size_inches(12, 6*len(metrics_to_plot))
+
+    for num, met in enumerate(metrics_to_plot):
+        if inner_dicts:
+            results_df = pd.DataFrame(
+                list(
+                    map(
+                    lambda x: (x[0][0], x[0][1], x[1][met]),
+                    metric_dict.items()
+                    )
+                ), columns=colnames
+            )
+        else:
+            results_df = pd.DataFrame(
+                list(
+                    map(
+                    lambda x: (x[0][0], x[0][1], x[1][-1][-1]),
+                    metric_dict.items()
+                    )
+                ), columns=colnames
+            )
+
+        if len(metrics_to_plot) > 1:
+            cur_ax = ax[num]
+        else:
+            cur_ax = ax
+        sns.heatmap(
+            results_df.pivot(index=colnames[0], columns=colnames[1], values=colnames[2]),
+            annot=True, ax=cur_ax, fmt='.3g', cmap=cmap, **kwargs
         )
-    else:
-        results_df = pd.DataFrame(
-            list(
-                map(
-                lambda x: (x[0][0], x[0][1], x[1][-1][-1]),
-                metric_dict.items()
-                )
-            ), columns=colnames
-        )
-
-
-    sns.heatmap(
-        results_df.pivot(index=colnames[0], columns=colnames[1], values=colnames[2]),
-        annot=True, ax=ax
-    )
-    ax.set_title('Accuracy heatmap',)
+        cur_ax.set_title(f'{met}')
     return fig, ax
+
+
+def build_lc(estimator, pars, train, train_y, valid, valid_y, metric_f, metric_f_name):
+    np.random.seed(13)
+    metrics_dict = {}
+
+    estmr = estimator(**pars)
+
+    for i in range(10, 103, 3):
+        random_index = np.random.choice(train.shape[0],
+                                        replace=False,
+                                        size=min(train.shape[0], round(train.shape[0] * i / 100)))
+
+        _, duration = time_it(estmr.fit, train[random_index], train_y[random_index])
+
+        train_preds = estmr.predict(train[random_index])
+        preds = estmr.predict(valid)
+
+        metrics = {}
+
+        metrics[f'test_{metric_f_name}'] = metric_f(valid_y, preds)
+        metrics[f'train_{metric_f_name}'] = metric_f(train_y[random_index], train_preds)
+
+        metrics['fit_time'] = duration
+
+        metrics_dict[i] = metrics
+        print(f"\r{i}% Ammount: {random_index.shape[0]} {duration:.4f} seconds, train: {metrics[f'train_{metric_f_name}']:.3f}, test: {metrics[f'test_{metric_f_name}']:.3f}", end='')
+
+    perc = sorted(metrics_dict.keys())
+    fig, axes = plt.subplots(1, 2)
+    fig.set_size_inches(9, 4)
+
+    axes[0].plot(perc,
+                 [metrics_dict[x][f'test_{metric_f_name}'] for x in perc], color='red',
+                 label='test')
+    axes[0].plot(perc,
+                 [metrics_dict[x][f'train_{metric_f_name}'] for x in perc], color='orange',
+                 label='train')
+
+    axes[0].legend()
+    axes[0].set_title(f'{metric_f_name}')
+    axes[0].set_xlabel('Ammount of the training set, percent')
+    # axes[0].set_ylim(0.5, 1)
+
+    axes[1].plot(perc,
+                 [metrics_dict[x]['fit_time'] for x in perc], color='blue')
+    axes[1].set_title('fit_time')
+    axes[1].set_xlabel('Ammount of the training set, percent')
+
+    fig.suptitle('Train volume effect', fontsize=15)
+
+    plt.tight_layout()
+    return fig, axes
