@@ -257,13 +257,14 @@ def plot_heatmap(metric_dict, inner_dicts=False, metrics_to_plot=['test_accuracy
     return fig, ax
 
 
-def build_lc(estimator, pars, train, train_y, valid, valid_y, metric_f, metric_f_name):
+def build_lc(estimator, pars, train, train_y, valid, valid_y, metric_f, metric_f_name,
+             percent_range=range(10, 103, 3)):
     np.random.seed(13)
     metrics_dict = {}
 
     estmr = estimator(**pars)
 
-    for i in range(10, 103, 3):
+    for i in percent_range:
         random_index = np.random.choice(train.shape[0],
                                         replace=False,
                                         size=min(train.shape[0], round(train.shape[0] * i / 100)))
