@@ -469,7 +469,7 @@ def plot_wo_results(wo_res):
         wo_pds[alg_name]['evals'] = wo_pds[alg_name]['fitness_curve'].apply(lambda x: len(x))
 
     fig, axes = plt.subplots(3, len(wo_pds))
-    fig.set_size_inches(5 * len(wo_pds), 15)
+    fig.set_size_inches(5 * len(wo_pds), 12)
     num = 0
 
     mets = ['MSE', 'duration', 'evals']
@@ -503,6 +503,7 @@ def plot_wo_results(wo_res):
             cur_ax.axhline(min_fitness, linestyle='--', alpha=0.5, label='min')
             cur_ax.axhline(max_fitness, linestyle='--', alpha=0.5, label='max')
             num += 1
+
     plt.tight_layout()
     return fig, axes, wo_pds
 
