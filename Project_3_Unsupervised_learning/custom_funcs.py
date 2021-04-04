@@ -641,7 +641,7 @@ def plot_fcl_results(fcl_results, fl_results, original_data_results):
         axes[0][num].set_xlim((perf_min_bound, perf_max_bound))
         axes[1][num].set_xlim((dur_min_bound, dur_max_bound))
 
-        axes[0].legend()
+        axes[0][num].legend()
         axes[1][num].legend()
 
     for ax in axes.ravel():
